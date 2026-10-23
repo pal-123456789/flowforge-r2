@@ -1,6 +1,6 @@
 # FlowForge — Round 2 Hand-off Commands
 
-Built in session, in `E:\Algoxilla\flowforge`.
+Built in this session.
 
 ---
 
@@ -49,7 +49,7 @@ git remote add origin https://github.com/pal-123456789/flowforge-r2.git
 git push -u origin main
 ```
 
-Note: `.git` exists in this workspace but points to the old Round 1 repo (`main`, no remotes). The commands above create a clean new repo — the old `.git` can be deleted (`rm -rf .git`) before `git init`, or kept non-destructively at `E:\Algoxilla\_flowforge_algothon_git_backup` (already backed up).
+Note: `.git` exists in this workspace but points to the old Round 1 repo. The old `.git` can be deleted (`rm -rf .git`) before `git init`, or backed up separately.
 
 ---
 
