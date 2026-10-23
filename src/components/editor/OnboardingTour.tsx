@@ -25,7 +25,7 @@ const STEPS: Step[] = [
   {
     icon: <Boxes size={20} />,
     title: "Drag nodes from the palette",
-    body: "The left panel holds 20 node types across 5 categories — triggers, actions, logic, data, and AI. Drag any onto the canvas, or double-click an empty spot for a quick-add menu.",
+    body: "The left panel holds 21 node types across 5 categories — triggers, actions, logic, data, and AI. Drag any onto the canvas, or double-click an empty spot for a quick-add menu.",
   },
   {
     icon: <MousePointerClick size={20} />,

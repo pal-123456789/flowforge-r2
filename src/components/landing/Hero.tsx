@@ -4,9 +4,10 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import dynamic from "next/dynamic";
 import { motion, useScroll, useTransform } from "framer-motion";
-import { Workflow as WorkflowIcon, Plus, Command, Sparkles, ArrowRight, Play, Github } from "lucide-react";
+import { Workflow as WorkflowIcon, Plus, Command, Sparkles, ArrowRight, Play, Github, ShieldCheck } from "lucide-react";
 import { Magnetic, Reveal, WordReveal } from "./primitives";
 import { HeroSceneFallback } from "./HeroScene";
+import { SOURCE_HREF, SOURCE_IS_EXTERNAL } from "@/lib/links";
 
 const HeroScene = dynamic(() => import("./HeroScene"), {
   ssr: false,
@@ -72,10 +73,11 @@ export function LandingNav({ onCommand }: { onCommand: () => void }) {
 
         <div className="flex items-center gap-2">
           <a
-            href="https://github.com/pal-123456789/flowforge"
-            target="_blank"
-            rel="noreferrer"
-            aria-label="View source on GitHub"
+            href={SOURCE_HREF}
+            {...(SOURCE_IS_EXTERNAL
+              ? { target: "_blank", rel: "noreferrer" }
+              : {})}
+            aria-label={SOURCE_IS_EXTERNAL ? "View source on GitHub" : "View the conformance report"}
             className="hidden h-9 w-9 items-center justify-center rounded-lg border border-line bg-bg-panel/60 text-ink-dim transition-colors hover:border-line-bright hover:text-ink sm:flex"
           >
             <Github size={16} />
@@ -200,7 +202,7 @@ export function Hero({ nodeCount }: { nodeCount: number }) {
         <Reveal delay={0.7}>
           <div className="mt-10 flex flex-wrap items-center justify-center gap-x-6 gap-y-2 text-xs text-ink-dim">
             <span className="flex items-center gap-1.5">
-              <span className="h-1.5 w-1.5 rounded-full bg-brand" /> {nodeCount}+
+              <span className="h-1.5 w-1.5 rounded-full bg-brand" /> {nodeCount}
               node types
             </span>
             <span className="flex items-center gap-1.5">
@@ -211,14 +213,12 @@ export function Hero({ nodeCount }: { nodeCount: number }) {
               <span className="h-1.5 w-1.5 rounded-full bg-magenta" /> Live
               node-by-node execution
             </span>
-            <a
-              href="https://github.com/pal-123456789/flowforge"
-              target="_blank"
-              rel="noreferrer"
+            <Link
+              href="/health"
               className="flex items-center gap-1.5 transition-colors hover:text-ink-soft"
             >
-              <Github size={13} /> Baloon National Hackathon 2026
-            </a>
+              <ShieldCheck size={13} /> 226 conformance checks
+            </Link>
           </div>
         </Reveal>
       </motion.div>

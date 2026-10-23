@@ -17,6 +17,7 @@ import type {
   NodeRunStatus,
   RunRecord,
   LogEntry,
+  NodePolicy,
 } from "@/lib/types";
 import { makeNode } from "@/lib/templates";
 import { autoLayoutNodes } from "@/lib/layout";
@@ -70,6 +71,8 @@ interface EditorState {
   addNodeOfType: (type: string, position: { x: number; y: number }) => void;
   updateNodeConfig: (id: string, config: Record<string, unknown>) => void;
   updateNodeLabel: (id: string, label: string) => void;
+  /** replace a node's reliability policy (timeout, retries, failure injection) */
+  updateNodePolicy: (id: string, policy: NodePolicy | undefined) => void;
   deleteNode: (id: string) => void;
   duplicateNode: (id: string) => void;
   selectNode: (id: string | null) => void;
@@ -219,6 +222,15 @@ export const useEditorStore = create<EditorState>((set, get) => ({
     set({
       nodes: get().nodes.map((n) =>
         n.id === id ? { ...n, data: { ...n.data, label } } : n
+      ),
+      dirty: true,
+    });
+  },
+
+  updateNodePolicy: (id, policy) => {
+    set({
+      nodes: get().nodes.map((n) =>
+        n.id === id ? { ...n, data: { ...n.data, policy } } : n
       ),
       dirty: true,
     });

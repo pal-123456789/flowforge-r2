@@ -26,7 +26,7 @@ export function Metrics({
   successRate: number;
 }) {
   const stats = [
-    { icon: Boxes, label: "Node types", value: nodeCount, suffix: "+", color: "#7c5cff" },
+    { icon: Boxes, label: "Node types", value: nodeCount, suffix: "", color: "#7c5cff" },
     { icon: WorkflowIcon, label: "Workflows", value: workflowCount, suffix: "", color: "#22c55e" },
     { icon: Activity, label: "Executions", value: runCount, suffix: "", color: "#06b6d4" },
     { icon: CheckCircle2, label: "Success rate", value: successRate, suffix: "%", color: "#ec4899" },

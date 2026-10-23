@@ -6,6 +6,7 @@ import {
   compare,
   getPath,
 } from "./expression";
+import { isEmail } from "./validation";
 
 /** Context passed to every executor. */
 export interface ExecContext {
@@ -13,6 +14,15 @@ export interface ExecContext {
   node: FlowNode;
   log: (level: LogEntry["level"], message: string) => void;
   signal?: AbortSignal;
+  /** secret names only (never values) — for capability checks and messages */
+  secretNames?: string[];
+  /** environment facts for capability-aware execution (server vs. browser) */
+  env?: Record<string, string | undefined>;
+  /**
+   * Injectable fetch, so the conformance suite can exercise network nodes
+   * deterministically and offline. Defaults to the global fetch.
+   */
+  fetchImpl?: typeof fetch;
 }
 
 export interface ExecResult {
@@ -23,6 +33,14 @@ export interface ExecResult {
   pass?: boolean;
   /** for loop nodes: emit multiple items */
   items?: unknown[];
+  /** pause the run here and wait for a human decision (Approval node) */
+  halt?: boolean;
+  /** why the run paused — surfaced in the UI */
+  haltReason?: string;
+  /** true when a side effect was simulated, not actually performed */
+  simulated?: boolean;
+  /** how a side-effecting action was delivered */
+  deliveryMode?: "live" | "mock" | "preview";
 }
 
 type Executor = (ctx: ExecContext) => Promise<ExecResult> | ExecResult;
@@ -80,7 +98,7 @@ const executors: Record<string, Executor> = {
   },
 
   /* actions */
-  "action.http": async ({ node, input, log, signal }) => {
+  "action.http": async ({ node, input, log, signal, fetchImpl }) => {
     const c = cfg(node);
     const ctx = asContext(input);
     const url = resolveToString(String(c.url || ""), ctx);
@@ -103,7 +121,8 @@ const executors: Record<string, Executor> = {
       }
     }
     log("info", `${method} ${url}`);
-    const res = await fetch(url, init);
+    const doFetch = fetchImpl ?? fetch;
+    const res = await doFetch(url, init);
     const text = await res.text();
     let data: unknown = text;
     try {
@@ -117,19 +136,205 @@ const executors: Record<string, Executor> = {
     };
   },
 
-  "action.email": ({ node, input, log }) => {
+  "action.email": async ({ node, input, log, env, signal, fetchImpl }) => {
     const c = cfg(node);
     const ctx = asContext(input);
-    const to = resolveToString(String(c.to || ""), ctx);
+    const to = resolveToString(String(c.to || ""), ctx).trim();
     const subject = resolveToString(String(c.subject || ""), ctx);
     const body = resolveToString(String(c.body || ""), ctx);
-    log("info", `✉️  Email -> ${to || "(no recipient)"} · "${subject}"`);
-    log("debug", body);
+    const from =
+      resolveToString(String(c.from || ""), ctx).trim() ||
+      "FlowForge <no-reply@flowforge.local>";
+    const requested = String(c.transport || "auto");
+
+    // ---- validate before doing anything (no silent no-ops) ----
+    if (!to) {
+      throw new Error("Validation: Send Email requires a recipient address");
+    }
+    if (!isEmail(to)) {
+      throw new Error(`Validation: "${to}" is not a valid email address`);
+    }
+
+    const apiKey = String(c.apiKey || "") || env?.RESEND_API_KEY || "";
+    const gateway = String(c.gatewayUrl || "") || env?.MAIL_GATEWAY_URL || "";
+
+    // ---- choose the delivery channel explicitly ----
+    let channel: "resend" | "gateway" | "mock" = "mock";
+    if (requested === "mock") {
+      channel = "mock";
+    } else if (requested === "resend") {
+      if (!apiKey) {
+        throw new Error(
+          "Auth: Resend transport selected but no API key is configured (set FF_SECRET_RESEND_KEY or the node's API key)"
+        );
+      }
+      channel = "resend";
+    } else if (requested === "gateway") {
+      if (!gateway) {
+        throw new Error(
+          "Validation: Gateway transport selected but no gateway URL is configured"
+        );
+      }
+      channel = "gateway";
+    } else if (requested === "auto") {
+      if (apiKey) channel = "resend";
+      else if (gateway) channel = "gateway";
+      else channel = "mock";
+    } else {
+      throw new Error(`Validation: unknown email transport "${requested}"`);
+    }
+
+    /* ------------------------------- MOCK ------------------------------- */
+    if (channel === "mock") {
+      log("warn", `✉️  SIMULATED email (mock mode) → ${to} · "${subject}"`);
+      log("debug", body);
+      log(
+        "warn",
+        "No mail transport is configured, so NOTHING was delivered. Set FF_SECRET_RESEND_KEY or FF_SECRET_MAIL_GATEWAY_URL, or choose a transport on this node."
+      );
+      return {
+        output: {
+          ...ctx,
+          email: {
+            to,
+            from,
+            subject,
+            body,
+            sentAt: new Date().toISOString(),
+            delivered: false,
+            simulated: true,
+            deliveryMode: "mock",
+            reason: "No mail transport configured",
+          },
+        },
+        simulated: true,
+        deliveryMode: "mock",
+      };
+    }
+
+    /* ------------------------------ RESEND ------------------------------ */
+    const doFetch = fetchImpl ?? fetch;
+    if (channel === "resend") {
+      log("info", `✉️  Sending live email via Resend → ${to}`);
+      const res = await doFetch("https://api.resend.com/emails", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${apiKey}`,
+        },
+        body: JSON.stringify({ from, to: [to], subject, text: body }),
+        signal,
+      });
+      const text = await res.text();
+      if (!res.ok) {
+        throw new Error(`HTTP ${res.status} from Resend: ${text.slice(0, 300)}`);
+      }
+      let id = "";
+      try {
+        id = (JSON.parse(text) as { id?: string }).id || "";
+      } catch {
+        /* non-JSON success body is fine */
+      }
+      log("info", `✅ Delivered by Resend${id ? ` (id ${id})` : ""}`);
+      return {
+        output: {
+          ...ctx,
+          email: {
+            to,
+            from,
+            subject,
+            body,
+            sentAt: new Date().toISOString(),
+            delivered: true,
+            simulated: false,
+            deliveryMode: "live",
+            channel: "resend",
+            id,
+          },
+        },
+        deliveryMode: "live",
+      };
+    }
+
+    /* ------------------------------ GATEWAY ----------------------------- */
+    log("info", `✉️  Sending live email via gateway → ${to}`);
+    const res = await doFetch(gateway, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ from, to, subject, text: body }),
+      signal,
+    });
+    const text = await res.text();
+    if (!res.ok) {
+      throw new Error(`HTTP ${res.status} from mail gateway: ${text.slice(0, 300)}`);
+    }
+    log("info", "✅ Delivered by mail gateway");
     return {
       output: {
         ...ctx,
-        email: { to, subject, body, sentAt: new Date().toISOString(), mock: true },
+        email: {
+          to,
+          from,
+          subject,
+          body,
+          sentAt: new Date().toISOString(),
+          delivered: true,
+          simulated: false,
+          deliveryMode: "live",
+          channel: "gateway",
+        },
       },
+      deliveryMode: "live",
+    };
+  },
+
+  /**
+   * Human-in-the-loop approval gate.
+   *
+   * First pass: returns `halt`, which pauses the entire run and records a
+   * PendingApproval. A resume call re-runs from this node with `_approval` on
+   * the input, which routes to the approved/rejected output handle.
+   */
+  "action.approval": ({ node, input, log }) => {
+    const c = cfg(node);
+    const ctx = asContext(input);
+    const request =
+      resolveToString(String(c.message || ""), ctx) ||
+      "Approval required to continue";
+    const approval = ctx._approval as
+      | { decision?: string; note?: string; by?: string; decidedAt?: string }
+      | undefined;
+
+    if (approval?.decision === "approved" || approval?.decision === "rejected") {
+      const decision = approval.decision;
+      log(
+        decision === "approved" ? "info" : "warn",
+        `✋ Human decision: ${decision.toUpperCase()}${approval.by ? ` by ${approval.by}` : ""}`
+      );
+      if (approval.note) log("debug", `Note: ${approval.note}`);
+      return {
+        output: {
+          ...ctx,
+          approval: {
+            decision,
+            by: approval.by,
+            note: approval.note,
+            decidedAt: approval.decidedAt || new Date().toISOString(),
+            request,
+          },
+        },
+        branch: decision,
+      };
+    }
+
+    log("info", `⏸  Pausing for human approval: ${request}`);
+    return {
+      output: {
+        ...ctx,
+        approval: { decision: "pending", requestedAt: new Date().toISOString(), request },
+      },
+      halt: true,
+      haltReason: request,
     };
   },
 
@@ -295,7 +500,7 @@ const executors: Record<string, Executor> = {
   },
 
   /* ai */
-  "ai.generate": async ({ node, input, log }) => {
+  "ai.generate": async ({ node, input, log, fetchImpl }) => {
     const c = cfg(node);
     const ctx = asContext(input);
     const prompt = resolveToString(String(c.prompt || ""), ctx);
@@ -308,7 +513,8 @@ const executors: Record<string, Executor> = {
     if (apiKey) {
       try {
         log("info", "Calling OpenAI (live mode)…");
-        const res = await fetch("https://api.openai.com/v1/chat/completions", {
+        const doFetch = fetchImpl ?? fetch;
+        const res = await doFetch("https://api.openai.com/v1/chat/completions", {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
@@ -371,6 +577,9 @@ function offlineAI(prompt: string, mode: string): string {
 export function hasExecutor(type: string): boolean {
   return type in executors;
 }
+
+/** Every node type that has a registered executor (used by the conformance suite). */
+export const EXECUTOR_TYPES: string[] = Object.keys(executors);
 
 export async function runNode(ctx: ExecContext): Promise<ExecResult> {
   const exec = executors[ctx.node.data.type];

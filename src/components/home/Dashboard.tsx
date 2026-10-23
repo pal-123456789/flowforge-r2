@@ -32,6 +32,29 @@ interface TemplateMeta {
   tags: string[];
 }
 
+function NavLink({
+  href,
+  children,
+  accent,
+}: {
+  href: string;
+  children: React.ReactNode;
+  accent?: boolean;
+}) {
+  return (
+    <Link
+      href={href}
+      className={
+        accent
+          ? "hidden md:block rounded-lg border border-brand/40 bg-brand/10 px-2.5 py-1.5 text-xs font-medium text-brand-soft transition-colors hover:bg-brand/20"
+          : "hidden md:block rounded-lg px-2.5 py-1.5 text-xs text-ink-dim transition-colors hover:bg-bg-panel hover:text-ink"
+      }
+    >
+      {children}
+    </Link>
+  );
+}
+
 export function Dashboard() {
   const router = useRouter();
   const { toast } = useToast();
@@ -106,18 +129,18 @@ export function Dashboard() {
               </div>
             </div>
           </div>
-          <div className="flex items-center gap-3">
-            <a
-              href="https://github.com/pal-123456789/flowforge"
-              target="_blank"
-              rel="noreferrer"
-              className="text-xs text-ink-dim hover:text-ink hidden sm:block"
-            >
-              Baloon National Hackathon 2026
-            </a>
+          <div className="flex items-center gap-1.5">
+            <NavLink href="/runs">Runs</NavLink>
+            <NavLink href="/analytics">Analytics</NavLink>
+            <NavLink href="/health" accent>
+              Conformance
+            </NavLink>
+            <NavLink href="/benchmarks" accent>
+              Benchmarks
+            </NavLink>
             <Link
               href="/editor"
-              className="flex items-center gap-2 px-4 py-2 rounded-lg bg-brand text-white text-sm font-semibold hover:bg-brand-soft transition-colors shadow-glow"
+              className="ml-1 flex items-center gap-2 px-4 py-2 rounded-lg bg-brand text-white text-sm font-semibold hover:bg-brand-soft transition-colors shadow-glow"
             >
               <Plus size={16} /> New workflow
             </Link>

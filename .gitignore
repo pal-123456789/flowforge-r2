@@ -22,3 +22,7 @@ next-env.d.ts
 *.log
 coverage
 .vscode
+
+# deck render previews (regenerate with: node .../libreoffice-kit/lib/cli.js render)
+preview-*/
+preview-r2/

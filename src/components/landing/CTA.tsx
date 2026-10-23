@@ -10,6 +10,7 @@ import {
   Heart,
 } from "lucide-react";
 import { Magnetic, Reveal } from "./primitives";
+import { SOURCE_HREF, SOURCE_IS_EXTERNAL, SOURCE_LABEL } from "@/lib/links";
 
 export function CTA() {
   return (
@@ -75,12 +76,13 @@ export function CTA() {
                 View analytics
               </Link>
               <a
-                href="https://github.com/pal-123456789/flowforge"
-                target="_blank"
-                rel="noreferrer"
+                href={SOURCE_HREF}
+                {...(SOURCE_IS_EXTERNAL
+                  ? { target: "_blank", rel: "noreferrer" }
+                  : {})}
                 className="flex items-center gap-2 rounded-xl border border-line bg-bg-panel/50 px-7 py-4 text-base font-medium text-ink-soft backdrop-blur transition-colors hover:text-ink"
               >
-                <Github size={17} /> Source
+                <Github size={17} /> {SOURCE_LABEL}
               </a>
             </div>
           </Reveal>
@@ -96,16 +98,18 @@ export function LandingFooter() {
       title: "Product",
       links: [
         { label: "Editor", href: "/editor" },
+        { label: "Runs", href: "/runs" },
         { label: "Analytics", href: "/analytics" },
         { label: "Templates", href: "#workspace" },
         { label: "Node library", href: "#nodes" },
       ],
     },
     {
-      title: "Platform",
+      title: "Evidence",
       links: [
-        { label: "Features", href: "#features" },
-        { label: "Live demo", href: "#demo" },
+        { label: "Conformance suite", href: "/health" },
+        { label: "Benchmark lab", href: "/benchmarks" },
+        { label: "Disclosure", href: "/health" },
         { label: "Engine", href: "#architecture" },
       ],
     },
@@ -160,12 +164,13 @@ export function LandingFooter() {
           <span className="flex items-center gap-4">
             <span>Next.js · React Flow · Three.js · Framer Motion</span>
             <a
-              href="https://github.com/pal-123456789/flowforge"
-              target="_blank"
-              rel="noreferrer"
+              href={SOURCE_HREF}
+              {...(SOURCE_IS_EXTERNAL
+                ? { target: "_blank", rel: "noreferrer" }
+                : {})}
               className="flex items-center gap-1.5 transition-colors hover:text-ink-soft"
             >
-              <Github size={13} /> Source
+              <Github size={13} /> {SOURCE_LABEL}
             </a>
           </span>
         </div>

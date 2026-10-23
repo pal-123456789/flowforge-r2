@@ -5,7 +5,8 @@
 🧑‍💻 **Built for:** Baloon National Hackathon 2026
 🏷️ **Focus:** Visual Workflow Automation — a no-code, offline-first workflow builder
 ⚡ **Runs 100% offline** — zero paid API keys, zero external services required.
-🌐 **Live demo:** https://flowforge-lac-eight.vercel.app
+🌐 **Live demo:** https://flowforge-r2.vercel.app
+📦 **Source:** https://github.com/pal-123456789/flowforge-r2
 
 ---
 
@@ -14,7 +15,7 @@
 1. [The problem](#-the-problem)
 2. [Our solution](#-our-solution)
 3. [Feature tour](#-feature-tour)
-4. [The complete node library](#-the-complete-node-library-20-nodes--5-categories)
+4. [The complete node library](#-the-complete-node-library-21-nodes--5-categories)
 5. [How the engine works](#-how-the-engine-works)
 6. [The expression language](#-the-expression-language)
 7. [Architecture](#-architecture)
@@ -69,9 +70,10 @@ the visual editor *and* the execution engine. Add one declarative node definitio
 - becomes available in the command palette,
 - and runs on the engine.
 
-That single-source-of-truth design is what lets FlowForge ship **20 node types across 5
-categories** — with real branching, looping, merging, templating, sandboxed JavaScript, and
-AI — as one coherent, maintainable system instead of 20 one-off features.
+That single-source-of-truth design is what lets FlowForge ship **21 node types across 5
+categories** — with real branching, batching, merging, templating, sandboxed JavaScript, AI,
+human approvals, and per-node reliability policies — as one coherent, maintainable system
+instead of 21 one-off features.
 
 ---
 
@@ -105,7 +107,18 @@ FlowForge is intentionally deep. Here are the headline capabilities; the full in
 - **Real branching** — `If/Else` and `Switch` route execution down specific edges using true **edge-activation** (downstream nodes on the untaken branch are skipped, not just ignored).
 - **Filtering** — a `Filter` node halts a branch unless its condition passes.
 - **Merging** — a `Merge` node waits for multiple branches and combines their outputs.
-- **Looping** — a `Loop` node iterates an array and emits each item downstream.
+- **Batching** — a `Batch Split` node slices an array field into a batch of up to N items and passes the batch downstream in a single pass.
+- **Human approvals** — an `Approval` node pauses the run until a human approves or rejects, then routes to the Approved or Rejected edge.
+
+### Reliability, honesty & self-verification
+- **Per-node reliability policy** — every execution is wrapped with a hard timeout (default 15 s, max 120 s), 0–5 retries with exponential backoff (base 300 ms, cap 5 s), a retry trigger (`always`/`error`/`timeout`), and optional continue-on-error that degrades the run to `partial` instead of failing it.
+- **Failure Injection** — force any node to fail (`error`/`timeout`) to demo and test failure paths; injection is always logged as a 🧪 warning.
+- **Root-cause diagnostics** — every failure is classified into one of **14 structured codes** (timeout, network, auth, rate-limit, validation, code syntax/runtime, …) with a cause and a concrete fix, shown on the node's diagnosis card.
+- **Secrets** — reference `{{secrets.NAME}}` in any config; values resolve from `FF_SECRET_*` environment variables at execution time into a copy of the config, are redacted from logs, and never enter the stored workflow JSON or exports.
+- **Honest email delivery** — `Send Email` posts live to Resend or an HTTP mail gateway when a credential is configured; otherwise it runs in mock mode that is explicitly labelled `SIMULATED` and never claims delivery. A simulated side effect is flagged on the node and the run — never presented as real.
+- **Self-describing storage** — the persistence backend is discovered at runtime (remote KV → project `data/` → temp dir → memory) and the active mode, its durability, and the reason are reportable via the API.
+- **Node Conformance Suite** — the platform tests itself: 4 contract layers per node type plus platform-wide cross-checks. **Measured: 226 checks passed, 0 failed, 2 skipped (deliberately — Write File would mutate disk), 100% score, across 21 node types in ~1.7 s.** Served by `GET /api/health` (200 all-pass / 503 any-fail) as a real readiness probe.
+- **Benchmark Lab** — 6 deterministic offline workloads with p50/p95/p99 percentiles and 4 hard guarantees (timeout is a hard ceiling, failures are always classified, continue-on-error yields a `partial` run, simulated side effects are labelled). **Measured: p95 ≤ 2 ms on every workload, 0 failures.** Served by `GET /api/benchmarks`.
 
 ### Power features
 - **Template expression engine** — `{{dot.path}}` interpolation is available in nearly every field, with helpers like `{{json}}` (the whole payload) and array/object path access.
@@ -125,7 +138,7 @@ FlowForge is intentionally deep. Here are the headline capabilities; the full in
 
 ---
 
-## 🧩 The complete node library (20 nodes · 5 categories)
+## 🧩 The complete node library (21 nodes · 5 categories)
 
 Every node below is **real and executable**. The `type` is the engine dispatch key.
 
@@ -143,10 +156,11 @@ Every node below is **real and executable**. The `type` is the engine dispatch k
 | Node | `type` | What it does |
 | --- | --- | --- |
 | **HTTP Request** | `action.http` | Makes a **real** HTTP request (GET/POST/PUT/PATCH/DELETE) with templated URL, headers, and body; captures status + parsed JSON/text. |
-| **Send Email** | `action.email` | Composes an email; runs in safe mock mode offline and logs the full message. |
+| **Send Email** | `action.email` | Sends real email via **Resend** (key from the node or `RESEND_API_KEY`) or an **HTTP mail gateway** (`gatewayUrl` or `MAIL_GATEWAY_URL`). With no transport configured it runs in mock mode that logs an explicit `SIMULATED email (mock mode)` warning and records `delivered: false` — a simulated side effect is never presented as a real delivery. The recipient is validated before anything is sent. |
 | **Log** | `action.log` | Writes a templated message to the run console at a chosen level. |
 | **Delay** | `action.delay` | Pauses the branch for N milliseconds (capped for safety). |
 | **Write File** | `action.writeFile` | Writes templated content to a file under `/data/outputs` (server-side); logs a preview in the browser. |
+| **Approval** | `action.approval` | **Human-in-the-loop gate.** Pauses the whole run (status `"paused"`) until someone approves or rejects via `POST /api/runs/[id]/resume`, then routes to the **Approved** or **Rejected** output edge. |
 
 ### Logic — branch & control flow
 
@@ -156,7 +170,7 @@ Every node below is **real and executable**. The `type` is the engine dispatch k
 | **Switch** | `logic.switch` | Routes to one of several case edges (or Default) based on a value. |
 | **Filter** | `logic.filter` | Passes data through only if the condition holds; otherwise downstream is skipped. |
 | **Merge** | `logic.merge` | Waits for multiple incoming branches and combines them (object-merge or array). |
-| **Loop / Iterator** | `logic.loop` | Iterates over an array field and emits each item on the **Each item** edge. |
+| **Batch Split** | `logic.loop` | Slices an array field into a batch of up to N items and passes the batch downstream **in a single pass** on the **Batch** edge. It does not iterate per item — map over the batch in a Code node if you need per-item work. |
 
 ### Data — shape & transform
 
@@ -174,9 +188,10 @@ Every node below is **real and executable**. The `type` is the engine dispatch k
 | --- | --- | --- |
 | **AI Generate** | `ai.generate` | Generates text from a prompt. Modes: smart summary, sentiment classifier, keyword extractor. Uses OpenAI if a key is set, else an offline deterministic mock. |
 
-> Adding a 21st node is a single declarative object in `src/lib/nodeRegistry.ts` plus one
+> Adding a 22nd node is a single declarative object in `src/lib/nodeRegistry.ts` plus one
 > executor function in `src/lib/executors.ts`. The palette, forms, validation, command palette,
-> and engine all pick it up automatically.
+> and engine all pick it up automatically — and the Node Conformance Suite then checks its
+> registry, schema, executor, and behaviour contracts on every `/api/health` call.
 
 ---
 
@@ -186,24 +201,37 @@ The engine lives in [`src/lib/engine.ts`](./src/lib/engine.ts) and is a from-scr
 topological DAG executor — no third-party workflow runtime.
 
 1. **Analyze** — `analyzeGraph` (in `src/lib/graph.ts`) builds adjacency/incoming maps, finds
-   triggers, detects cycles via **Kahn's algorithm**, and produces a best-effort topological
-   order plus a list of validation issues. A graph with any error-level issue won't run.
+   triggers, detects cycles via **Kahn's algorithm**, produces a best-effort topological order,
+   and merges in **registry-driven config validation** (required fields, formats, numeric
+   ranges per node). A graph with any error-level issue won't run.
 2. **Seed** — the run begins at the trigger(s). Each trigger emits its payload onto its
-   outgoing edges.
+   outgoing edges. A partial run (`fromNodeId` + `initialInput`) seeds the chosen node
+   directly instead and marks everything outside its subtree skipped.
 3. **Walk** — nodes execute in topological order. A node runs once **all of its active incoming
    edges have delivered values**. Its executor returns an `ExecResult`:
    - `output` — the data passed downstream.
-   - `branch` — which output handle to activate (`If/Else`, `Switch`). Only the matching edge is activated; the others are left inactive, so their subtrees are **skipped**.
+   - `branch` — which output handle to activate (`If/Else`, `Switch`, `Approval`). Only the
+     matching edge is activated; the others are left inactive, so their subtrees are **skipped**.
    - `pass` — for `Filter`; when `false`, downstream edges are not activated.
-   - `items` — for `Loop`; emits multiple values.
-4. **Merge semantics** — a `Merge` node collects the array of active inputs and either
+   - `halt` / `haltReason` — for `Approval`; pauses the run and records a `pendingApproval`.
+   - `simulated` / `deliveryMode` — how a side effect was performed (`live`/`mock`/`preview`).
+4. **Wrap** — every execution runs under the node's **reliability policy** (`withPolicy` in
+   `src/lib/policy.ts`): hard timeout → bounded retries with exponential backoff → optional
+   continue-on-error. Attempt counts and timeouts are recorded on the node result.
+5. **Classify** — any failure is run through the diagnosis engine (`src/lib/diagnostics.ts`)
+   and attached to the node result as a structured `Diagnosis` (code, cause, fix, severity,
+   retryable).
+6. **Merge semantics** — a `Merge` node collects the array of active inputs and either
    shallow-merges objects or returns them as an array.
-5. **Observe** — the engine emits `onNodeStart`, `onNodeFinish`, `onLog`, and `onDone` events.
-   The editor subscribes to animate node status and stream the console in real time; the API
-   route collects them into a persisted `RunRecord`.
+7. **Observe** — the engine emits `onNodeStart`, `onNodeFinish`, `onLog`, `onPaused`, and
+   `onDone` events. The editor subscribes to animate node status and stream the console in
+   real time; the API route collects them into a persisted `RunRecord`.
 
-Errors are contained: a failing node is marked `error` and its downstream edges are **not**
-activated, so the rest of the graph degrades gracefully instead of crashing the run.
+Failure semantics are explicit: a non-tolerated failure ends the run as `"error"` and its
+downstream edges are **not** activated; a failure tolerated via continue-on-error activates the
+outgoing edges with an **error carrier** (`_error` field) so the flow continues and the run
+finishes `"partial"`; a run halted at an Approval gate finishes `"paused"`. Secret values are
+redacted from every log line before it is stored.
 
 See [`ARCHITECTURE.md`](./ARCHITECTURE.md) for the full data model and edge-activation algorithm.
 
@@ -230,16 +258,16 @@ Expressions are resolved against the node's incoming data. The `If/Else`, `Switc
 ```
 ┌──────────────────────────────────────────────────────────────────────┐
 │                          nodeRegistry.ts                               │
-│         (single source of truth: 20 node type definitions)            │
+│         (single source of truth: 21 node type definitions)            │
 └───────────────┬───────────────────────────────────┬──────────────────┘
                 │ drives                              │ drives
        ┌────────▼─────────┐                 ┌─────────▼──────────┐
        │   Visual editor   │                 │  Execution engine  │
        │ ───────────────── │                 │ ────────────────── │
        │ NodePalette       │                 │ engine.ts (DAG)    │
-       │ Canvas (ReactFlow)│   serialize     │ executors.ts       │
-       │ Inspector forms   │ ───────────────▶│ expression.ts      │
-       │ ValidationPanel   │   nodes+edges   │ graph.ts (analyze) │
+       │ Canvas (ReactFlow)│   serialize     │ policy.ts (wrap)   │
+       │ Inspector forms   │ ───────────────▶│ executors.ts       │
+       │ ValidationPanel   │   nodes+edges   │ diagnostics.ts     │
        │ editorStore (Zust)│◀─────────────── │                    │
        └────────┬──────────┘   run events    └─────────┬──────────┘
                 │                                       │
@@ -247,14 +275,16 @@ Expressions are resolved against the node's incoming data. The `If/Else`, `Switc
        ┌────────▼───────────────────────────────────────▼─────────┐
        │                   Next.js App Router API                   │
        │  /api/workflows  /api/run  /api/runs  /api/webhook/[id]    │
+        │  /api/health    /api/benchmarks  /api/runs/[id]/resume    │
        └────────────────────────────┬───────────────────────────── ┘
                                      │
                         ┌────────────▼────────────┐
-                        │  File store (server)     │
-                        │  data/workflows/*.json   │
-                        │  data/runs/*.json        │
-                        │  (temp-dir fallback on    │
-                        │   serverless hosts)      │
+                        │  Self-describing store   │
+                        │  probe: remote KV first  │
+                        │  (Upstash / Vercel KV),  │
+                        │  then data/ → temp dir   │
+                        │  → memory; storageInfo()  │
+                        │  reports what won & why  │
                         └──────────────────────────┘
 ```
 
@@ -263,7 +293,10 @@ Expressions are resolved against the node's incoming data. The `If/Else`, `Switc
 - **State:** Zustand store with an undo/redo history stack.
 - **Styling:** Tailwind CSS 3 with a custom CSS-variable design-token system (light & dark themes).
 - **Motion/3D:** Framer Motion, Three.js + @react-three/fiber, Lenis smooth-scroll.
-- **Persistence:** file-based JSON (survives restarts locally; per-session on serverless).
+- **Persistence:** self-describing storage with runtime backend probing — remote KV (Upstash /
+  Vercel KV REST) when configured, else the project's `data/` directory, else the OS temp dir,
+  else in-process memory. `storageInfo()` reports the active backend, whether it is durable,
+  and why.
 
 ---
 
@@ -296,6 +329,34 @@ OPENAI_API_KEY=sk-...
 ```
 
 If unset, the AI node automatically uses its deterministic offline implementation.
+
+### Optional: real email, secrets, durable storage & signed webhooks
+
+All of these are **optional** — the product is fully functional without any of them:
+
+```bash
+# .env.local
+# Secrets: any FF_SECRET_<NAME> variable is available as {{secrets.NAME}} in node config.
+# The value is substituted into a copy of the config at execution time and never stored.
+FF_SECRET_RESEND_KEY=re_...          # used by {{secrets.RESEND_KEY}}
+FF_SECRET_MAIL_GATEWAY_URL=https://…
+
+# Live email (the Send Email node auto-detects these; without them it stays in labelled mock mode)
+RESEND_API_KEY=re_...
+MAIL_GATEWAY_URL=https://…           # receives {from,to,subject,text} as JSON
+
+# Durable storage (probe order: remote KV → project data/ → temp dir → memory)
+KV_REST_API_URL=https://…            # Upstash / Vercel KV REST
+KV_REST_API_TOKEN=…
+# or: UPSTASH_REDIS_REST_URL / UPSTASH_REDIS_REST_TOKEN
+
+# Signed webhooks (optional; without it the endpoint reports "authMode": "unsigned")
+FF_WEBHOOK_SECRET=whsec_...
+```
+
+In the browser no secrets resolve — a node that needs one fails with an `AUTH` diagnosis
+rather than silently sending nothing. Server-side runs (`/api/run`, webhooks, resume) resolve
+secrets from the server environment.
 
 ---
 
@@ -347,7 +408,10 @@ Full details and examples in [`API.md`](./API.md). Summary:
 | `GET /api/runs` | List run records (optionally by `workflowId`). |
 | `POST /api/runs` | Persist a run record produced by the in-browser engine. |
 | `GET /api/runs/[id]` | Fetch one run record. |
-| `POST /api/webhook/[id]` | Trigger a workflow with the request body as input. |
+| `POST /api/runs/[id]/resume` | Approve/reject a run paused at an Approval node and continue it. |
+| `POST /api/webhook/[id]` | Trigger a workflow with the request body as input (optional HMAC signing). |
+| `GET /api/health` | Run the Node Conformance Suite; 200 all-pass, 503 any-fail. |
+| `GET /api/benchmarks` | Run the Benchmark Lab (`?iterations=N`, 1–200, default 20). |
 
 ---
 
@@ -359,7 +423,7 @@ flowforge/
 ├── scripts/seed.mjs           # Seeds demo workflows into data/
 ├── src/
 │   ├── app/                   # Next.js App Router (pages, loading states, API routes)
-│   │   ├── api/               # workflows, run, runs, runs/[id], webhook/[id]
+│   │   ├── api/               # workflows, run, runs(+resume), webhook, health, benchmarks
 │   │   ├── editor/            # /editor and /editor/[id]
 │   │   ├── runs/              # /runs and /runs/[id]
 │   │   ├── analytics/         # /analytics
@@ -374,8 +438,14 @@ flowforge/
 │   │   ├── landing/           # Hero, Sections, Workspace, 3D scenes, primitives
 │   │   └── ui/                # Toast, Icon, JsonView, Loader3D, ClickFX
 │   ├── lib/
-│   │   ├── nodeRegistry.ts    # ← single source of truth (20 node defs)
-│   │   ├── engine.ts          # topological DAG executor (+ partial "run from here")
+│   │   ├── nodeRegistry.ts    # ← single source of truth (21 node defs)
+│   │   ├── engine.ts          # topological DAG executor (+ partial "run from here", approvals)
+│   │   ├── policy.ts          # per-node reliability: timeout, retries, backoff, injection
+│   │   ├── diagnostics.ts     # 14-code root-cause classification for every failure
+│   │   ├── secrets.ts         # FF_SECRET_* env vars → {{secrets.NAME}} + redaction
+│   │   ├── validation.ts      # registry-driven required/format/range checks
+│   │   ├── conformance.ts     # Node Conformance Suite (self-test, backs /api/health)
+│   │   ├── benchmark.ts       # Benchmark Lab (percentiles + guarantees, backs /api/benchmarks)
 │   │   ├── executors.ts       # per-node execution logic
 │   │   ├── expression.ts      # {{template}} engine + comparisons
 │   │   ├── graph.ts           # analyze/validate (Kahn's algorithm)
@@ -386,7 +456,7 @@ flowforge/
 │   │   ├── templates.ts       # built-in starter workflows
 │   │   ├── types.ts           # shared TypeScript types
 │   │   ├── utils.ts           # formatting helpers
-│   │   └── server/            # file store + output writer (serverless-safe)
+│   │   └── server/            # self-describing store (KV → data/ → temp → memory) + output writer
 │   └── store/editorStore.ts   # Zustand editor state + history
 └── (README / FEATURES / ARCHITECTURE / API / CHANGELOG / DISCLOSURE).md
 ```
@@ -407,12 +477,16 @@ flowforge/
 The repo root is the Next.js app, so **Vercel auto-detects it** — import the repo and deploy
 with zero config. The included `vercel.json` pins the framework and build command.
 
-On read-only serverless filesystems the server store transparently falls back to the OS temp
-directory and seeds it from the bundled demo data, so **create / save / run / delete all work**
-for the session. (Persistence is per-session on serverless; it's durable when self-hosted with
-`npm run start`.)
+The storage backend is **discovered at runtime by probing**, in this order: remote KV
+(Upstash / Vercel KV REST — set `KV_REST_API_URL`+`KV_REST_API_TOKEN` or
+`UPSTASH_REDIS_REST_URL`+`UPSTASH_REDIS_REST_TOKEN`) → durable across redeploys and instances;
+then the project's `data/` directory when writable → durable on a VM/container; then the OS
+temp directory → ephemeral, per-instance (seeded from the bundled demo data so the demo opens
+with content); finally in-process memory as a last resort, so the product degrades instead of
+crashing. `GET /api/health` reports which backend is live, whether it is durable, and why —
+including the reason a better backend was rejected.
 
-Live deployment: **https://flowforge-lac-eight.vercel.app**
+Live deployment: **https://flowforge-r2.vercel.app**  ·  Source: **https://github.com/pal-123456789/flowforge-r2**
 
 ---
 
@@ -434,7 +508,7 @@ Live deployment: **https://flowforge-lac-eight.vercel.app**
 See [`DISCLOSURE.md`](./DISCLOSURE.md) for the full statement. Summary:
 
 - **AI tools:** an AI coding assistant was used to help scaffold and write code; all code was reviewed and is our responsibility.
-- **External APIs:** OpenAI API — *optional*, only if a key is supplied. Demo HTTP examples call the public `jsonplaceholder.typicode.com` test API.
+- **External APIs:** OpenAI API — *optional*, only if a key is supplied. Resend and/or an HTTP mail gateway — *optional*, only for live email delivery; without them email is mock mode, explicitly labelled as simulated. Upstash / Vercel KV — *optional*, only for durable remote storage. Demo HTTP examples call the public `jsonplaceholder.typicode.com` test API.
 - **Datasets:** none.
 - **Notable libraries (all permissive licenses):** Next.js, React, React Flow, Zustand, Tailwind CSS, lucide-react, nanoid, clsx, Framer Motion, Three.js, @react-three/fiber, Lenis.
 

@@ -1,5 +1,6 @@
 import type { FlowNode, FlowEdge, Workflow } from "./types";
 import { getNodeDef } from "./nodeRegistry";
+import { validateAllNodes } from "./validation";
 
 export interface GraphIssue {
   level: "error" | "warning";
@@ -85,6 +86,15 @@ export function analyzeGraph(nodes: FlowNode[], edges: FlowEdge[]): GraphAnalysi
     issues.push({
       level: "error",
       message: "Workflow contains a cycle. Automation graphs must be acyclic (DAG).",
+    });
+  }
+
+  // Registry-driven configuration validation (required fields, formats, ranges).
+  for (const ci of validateAllNodes(nodes)) {
+    issues.push({
+      level: ci.level,
+      message: `${ci.nodeLabel}: ${ci.message}`,
+      nodeId: ci.nodeId,
     });
   }
 

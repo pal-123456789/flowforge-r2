@@ -3,7 +3,12 @@
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import type { RunRecord, NodeRunResult } from "@/lib/types";
+import type {
+  RunRecord,
+  NodeRunResult,
+  PendingApproval,
+  Diagnosis,
+} from "@/lib/types";
 import { NODE_MAP, CATEGORY_HEX } from "@/lib/nodeRegistry";
 import { fmtDuration, fmtTime, fmtRelative, cn } from "@/lib/utils";
 import { JsonView } from "@/components/ui/JsonView";
@@ -25,6 +30,11 @@ import {
   Gauge,
   Hash,
   Download,
+  Check,
+  X,
+  RefreshCw,
+  ShieldCheck,
+  FlaskConical,
 } from "lucide-react";
 
 const STATUS_META: Record<
@@ -37,6 +47,8 @@ const STATUS_META: Record<
   running: { color: "#7c5cff", icon: Loader2, label: "Running" },
   idle: { color: "#6b7291", icon: MinusCircle, label: "Idle" },
   waiting: { color: "#f59e0b", icon: Clock, label: "Waiting" },
+  paused: { color: "#f59e0b", icon: Clock, label: "Paused for approval" },
+  partial: { color: "#f59e0b", icon: AlertTriangle, label: "Partial" },
 };
 
 export function RunDetail({ runId }: { runId: string }) {
@@ -227,9 +239,29 @@ export function RunDetail({ runId }: { runId: string }) {
             label="Trigger"
             value={run.trigger}
           />
+          <StatCard
+            icon={run.anySimulated ? FlaskConical : CheckCircle2}
+            label="Delivery"
+            value={run.anySimulated ? "Simulated" : "Live"}
+            color={run.anySimulated ? "#f59e0b" : "#22c55e"}
+          />
         </div>
 
         <div className="mt-8 grid gap-6 lg:grid-cols-[1.1fr_1fr]">
+          {/* approval gate */}
+          {run.status === "paused" && run.pendingApproval && (
+            <div className="lg:col-span-2">
+              <ApprovalPanel
+                runId={run.id}
+                pending={run.pendingApproval}
+                onDecided={(newRunId) => {
+                  toast("success", "Decision recorded", "Continuing to the resumed run");
+                  router.push(`/runs/${newRunId}`);
+                }}
+              />
+            </div>
+          )}
+
           {/* timeline */}
           <section>
             <SectionLabel icon={Activity} title="Execution timeline" />
@@ -291,6 +323,157 @@ export function RunDetail({ runId }: { runId: string }) {
           </div>
         </section>
       </div>
+    </div>
+  );
+}
+
+/**
+ * Human-in-the-loop gate. Appears only on a paused run and posts the decision
+ * to /api/runs/<id>/resume, which re-executes from the approval node and
+ * returns a new run containing the whole stitched timeline.
+ */
+function ApprovalPanel({
+  runId,
+  pending,
+  onDecided,
+}: {
+  runId: string;
+  pending: PendingApproval;
+  onDecided: (newRunId: string) => void;
+}) {
+  const [note, setNote] = useState("");
+  const [busy, setBusy] = useState<null | "approved" | "rejected">(null);
+
+  const decide = async (decision: "approved" | "rejected") => {
+    setBusy(decision);
+    try {
+      const res = await fetch(`/api/runs/${runId}/resume`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ decision, note: note || undefined, by: "operator" }),
+      });
+      const json = await res.json();
+      if (!res.ok) {
+        throw new Error(json?.error || "resume failed");
+      }
+      onDecided(json.run.id);
+    } catch {
+      setBusy(null);
+    }
+  };
+
+  return (
+    <div className="rounded-xl border border-warn/40 bg-warn/[0.07] p-5">
+      <div className="flex items-start gap-3">
+        <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-warn/20 text-warn">
+          <Clock size={18} />
+        </span>
+        <div className="min-w-0 flex-1">
+          <div className="flex items-center gap-2">
+            <h3 className="text-sm font-semibold text-ink">
+              Approval required
+            </h3>
+            <span className="rounded-full border border-warn/40 bg-warn/15 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider text-warn">
+              run paused
+            </span>
+          </div>
+          <p className="mt-1 text-sm text-ink-soft">{pending.request}</p>
+          <p className="mt-0.5 font-mono text-[11px] text-ink-dim">
+            node {pending.nodeLabel} · requested{" "}
+            {fmtRelative(new Date(pending.requestedAt).toISOString())}
+          </p>
+
+          <input
+            value={note}
+            onChange={(e) => setNote(e.target.value)}
+            placeholder="Optional note recorded with the decision…"
+            className="mt-3 w-full rounded-lg border border-line bg-bg-soft px-3 py-2 text-sm text-ink placeholder:text-ink-dim focus:border-warn/60 focus:outline-none"
+          />
+
+          <div className="mt-3 flex flex-wrap gap-2">
+            <button
+              onClick={() => decide("approved")}
+              disabled={busy !== null}
+              className="flex items-center gap-1.5 rounded-lg bg-ok px-4 py-2 text-sm font-semibold text-white transition-colors hover:brightness-110 disabled:opacity-60"
+            >
+              {busy === "approved" ? (
+                <Loader2 size={14} className="animate-spin" />
+              ) : (
+                <Check size={14} />
+              )}
+              Approve & continue
+            </button>
+            <button
+              onClick={() => decide("rejected")}
+              disabled={busy !== null}
+              className="flex items-center gap-1.5 rounded-lg border border-err/50 bg-err/10 px-4 py-2 text-sm font-semibold text-err transition-colors hover:bg-err/20 disabled:opacity-60"
+            >
+              {busy === "rejected" ? (
+                <Loader2 size={14} className="animate-spin" />
+              ) : (
+                <X size={14} />
+              )}
+              Reject
+            </button>
+          </div>
+          <p className="mt-2 text-[11px] leading-snug text-ink-dim">
+            The workflow stops here — nothing downstream has executed. Approving
+            re-runs from this node with your decision recorded on the audit trail.
+          </p>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+const DIAGNOSIS_HEX: Record<string, string> = {
+  TIMEOUT: "#f59e0b",
+  NETWORK: "#3b82f6",
+  HTTP_STATUS: "#f59e0b",
+  AUTH: "#ef4444",
+  RATE_LIMIT: "#f59e0b",
+  INVALID_URL: "#ef4444",
+  VALIDATION: "#ef4444",
+  CODE_SYNTAX: "#ec4899",
+  CODE_RUNTIME: "#ec4899",
+  EXPRESSION: "#ec4899",
+  FILE_WRITE: "#ef4444",
+  MISSING_INPUT: "#3b82f6",
+  INJECTED: "#a855f7",
+  UNKNOWN: "#6b7291",
+};
+
+/** Classified root cause instead of a raw stack trace. */
+function DiagnosisCard({ d }: { d: Diagnosis }) {
+  const hex = DIAGNOSIS_HEX[d.code] ?? "#6b7291";
+  return (
+    <div
+      className="mt-3 rounded-xl border p-3"
+      style={{ borderColor: `${hex}55`, background: `${hex}12` }}
+    >
+      <div className="flex items-center gap-2">
+        <span
+          className="rounded px-1.5 py-0.5 font-mono text-[10px] font-bold uppercase tracking-wider text-white"
+          style={{ background: hex }}
+        >
+          {d.code}
+        </span>
+        <span className="min-w-0 flex-1 truncate text-[12.5px] font-semibold text-ink">
+          {d.title}
+        </span>
+        {d.retryable && (
+          <span className="shrink-0 text-[10px] uppercase tracking-wider text-ink-dim">
+            retryable
+          </span>
+        )}
+      </div>
+      <p className="mt-2 text-[12px] leading-relaxed text-ink-soft">{d.cause}</p>
+      <p className="mt-1.5 flex gap-1.5 text-[12px] leading-relaxed">
+        <span className="shrink-0" style={{ color: hex }}>
+          →
+        </span>
+        <span className="text-ink">{d.fix}</span>
+      </p>
     </div>
   );
 }
@@ -446,12 +629,38 @@ function NodeInspector({ result }: { result: NodeRunResult }) {
         </div>
       )}
 
-      {result.error && (
+      {result.diagnosis && <DiagnosisCard d={result.diagnosis} />}
+
+      {result.error && !result.diagnosis && (
         <div className="mt-3 rounded-lg border border-err/30 bg-err/10 px-3 py-2 text-xs text-err">
           <div className="mb-0.5 flex items-center gap-1 font-semibold">
             <XCircle size={12} /> Error
           </div>
           {result.error}
+        </div>
+      )}
+
+      {result.attempts !== undefined && result.attempts > 1 && (
+        <div className="mt-3 flex items-center gap-1.5 rounded-lg border border-warn/30 bg-warn/10 px-3 py-2 text-xs text-warn">
+          <RefreshCw size={12} />
+          Retried — {result.attempts} attempts before this outcome
+        </div>
+      )}
+
+      {result.tolerated && (
+        <div className="mt-3 flex items-center gap-1.5 rounded-lg border border-brand/30 bg-brand/10 px-3 py-2 text-xs text-brand-soft">
+          <ShieldCheck size={12} />
+          Failure tolerated (continue-on-error) — the run proceeded past this node
+        </div>
+      )}
+
+      {result.simulated && (
+        <div className="mt-3 flex items-center gap-1.5 rounded-lg border border-warn/30 bg-warn/10 px-3 py-2 text-xs font-medium text-warn">
+          <FlaskConical size={12} />
+          SIMULATED — no real side effect was performed
+          {result.deliveryMode && (
+            <span className="font-mono text-ink-dim">({result.deliveryMode})</span>
+          )}
         </div>
       )}
 

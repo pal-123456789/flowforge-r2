@@ -11,6 +11,7 @@ import {
   Toggle,
   KeyValueEditor,
 } from "./fields";
+import { PolicyEditor } from "./PolicyEditor";
 import { Copy, Trash2, Settings2, Info, PlayCircle } from "lucide-react";
 import { useToast } from "@/components/ui/Toast";
 
@@ -21,6 +22,7 @@ export function Inspector() {
   );
   const updateConfig = useEditorStore((s) => s.updateNodeConfig);
   const updateLabel = useEditorStore((s) => s.updateNodeLabel);
+  const updatePolicy = useEditorStore((s) => s.updateNodePolicy);
   const deleteNode = useEditorStore((s) => s.deleteNode);
   const duplicateNode = useEditorStore((s) => s.duplicateNode);
   const lastRun = useEditorStore((s) => s.lastRun);
@@ -140,13 +142,33 @@ export function Inspector() {
           </div>
         ))}
 
+        {/* reliability policy */}
+        <PolicyEditor policy={node.data.policy} onChange={(p) => updatePolicy(node.id, p)} />
+
         {/* last run output for this node */}
         {nodeResult && (
           <div className="pt-2 border-t border-line">
             <div className="text-[11px] font-semibold uppercase tracking-wider text-ink-dim mb-2">
               Last run · {nodeResult.status}
+              {nodeResult.attempts && nodeResult.attempts > 1 && (
+                <span className="ml-1.5 font-mono text-[10px] normal-case tracking-normal text-warn">
+                  {nodeResult.attempts} attempts
+                </span>
+              )}
             </div>
-            {nodeResult.error && (
+            {nodeResult.simulated && (
+              <div className="flex items-center gap-1.5 text-[10.5px] font-medium text-warn bg-warn/10 border border-warn/30 rounded-lg px-2 py-1.5 mb-2">
+                <span className="w-1.5 h-1.5 rounded-full bg-warn shrink-0" />
+                SIMULATED — no real side effect was performed
+                {nodeResult.deliveryMode && (
+                  <span className="font-mono text-ink-dim">({nodeResult.deliveryMode})</span>
+                )}
+              </div>
+            )}
+            {nodeResult.diagnosis && (
+              <DiagnosisCard d={nodeResult.diagnosis} />
+            )}
+            {nodeResult.error && !nodeResult.diagnosis && (
               <div className="text-xs text-err bg-err/10 border border-err/30 rounded-lg p-2 mb-2 font-mono">
                 {nodeResult.error}
               </div>
@@ -161,8 +183,65 @@ export function Inspector() {
   );
 }
 
-function OutputPreview({ output }: { output: unknown }) {
-  const text = (() => {
+const DIAGNOSIS_HEX: Record<string, string> = {
+  TIMEOUT: "#f59e0b",
+  NETWORK: "#3b82f6",
+  HTTP_STATUS: "#f59e0b",
+  AUTH: "#ef4444",
+  RATE_LIMIT: "#f59e0b",
+  INVALID_URL: "#ef4444",
+  VALIDATION: "#ef4444",
+  CODE_SYNTAX: "#ec4899",
+  CODE_RUNTIME: "#ec4899",
+  EXPRESSION: "#ec4899",
+  FILE_WRITE: "#ef4444",
+  MISSING_INPUT: "#3b82f6",
+  INJECTED: "#a855f7",
+  UNKNOWN: "#6b7280",
+};
+
+/**
+ * Root-cause diagnosis card. This is the "deliberate failure and diagnosis"
+ * story: instead of a raw stack trace, the panel sees a classified code, the
+ * likely cause, and the concrete fix.
+ */
+function DiagnosisCard({ d }: { d: import("@/lib/types").Diagnosis }) {
+  const hex = DIAGNOSIS_HEX[d.code] ?? "#6b7280";
+  return (
+    <div
+      className="rounded-xl border p-2.5 mb-2"
+      style={{ borderColor: `${hex}55`, background: `${hex}12` }}
+    >
+      <div className="flex items-center gap-2 mb-1.5">
+        <span
+          className="text-[9px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded font-mono text-white"
+          style={{ background: hex }}
+        >
+          {d.code}
+        </span>
+        <span className="text-[11.5px] font-semibold text-ink truncate">
+          {d.title}
+        </span>
+        {d.retryable && (
+          <span className="ml-auto text-[9px] uppercase tracking-wider text-ink-dim shrink-0">
+            retryable
+          </span>
+        )}
+      </div>
+      <div className="text-[11px] text-ink-soft leading-relaxed mb-1.5">
+        {d.cause}
+      </div>
+      <div className="flex gap-1.5 text-[11px] leading-relaxed">
+        <span className="shrink-0" style={{ color: hex }}>
+          →
+        </span>
+        <span className="text-ink">{d.fix}</span>
+      </div>
+    </div>
+  );
+}
+
+function OutputPreview({ output }: { output: unknown }) {  const text = (() => {
     try {
       return JSON.stringify(output, null, 2);
     } catch {
